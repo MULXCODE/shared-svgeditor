@@ -27,16 +27,18 @@ var DocumentModel = {
     getModel: function() {
         return this.rects;
     },
-    moved: function(rect,diff) {
-        this.history = this.history.slice(0,this.historyIndex+1)
-        var n = this.rects.indexOf(rect);
-        var newrects = this.rects.updateIn([n],function(r){
-            return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
-        });
+    setModel: function(newrects) {
         this.history.push(newrects);
         this.historyIndex++;
         this.rects = newrects;
         this.fireUpdate();
+    },
+    moved: function(rect,diff) {
+        this.history = this.history.slice(0,this.historyIndex+1)
+        var n = this.rects.indexOf(rect);
+        this.setModel(this.rects.updateIn([n],function(r){
+            return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
+        }));
     },
     on: function(type, cb) {
         this.listeners.push(cb);
@@ -49,14 +51,18 @@ var DocumentModel = {
     },
     addNewRect: function() {
         var rect = Immutable.fromJS({x:50,y:50, w:50, h:50});
-        this.rects = this.rects.push(rect);
-        this.fireUpdate();
+        this.setModel(this.rects.push(rect));
     },
     undo: function() {
         if(this.historyIndex <= 0) return;
-        console.log("undoing");
-        this.rects = this.history.pop();
         this.historyIndex--;
+        this.rects = this.history[this.historyIndex];
+        this.fireUpdate();
+    },
+    redo: function() {
+        if(this.historyIndex >= this.history.length-1) return;
+        this.historyIndex++;
+        this.rects = this.history[this.historyIndex];
         this.fireUpdate();
     }
 };
@@ -123,7 +129,7 @@ class Toolbar extends React.Component {
             <button onClick={DocumentModel.addNewRect.bind(DocumentModel)}>add</button>
             <button>delete selection</button>
             <button onClick={DocumentModel.undo.bind(DocumentModel)}>undo</button>
-            <button>redo</button>
+            <button onClick={DocumentModel.redo.bind(DocumentModel)}>redo</button>
         </div>
     }
 }
