@@ -22,7 +22,7 @@ import MainCSS from "./main.css"
 
 var arr = {
     selected:null,
-    rects:[{ x:20, y:30, w:40, h:50}, { x:100, y:30, w:40, h:20} ]};
+    rects:[{ x:20, y:30, w:40, h:50, id:'00'}, { x:100, y:30, w:40, h:20, id:'01'} ]};
 
 var DocumentModel = {
     listeners:[],
@@ -54,8 +54,10 @@ var DocumentModel = {
         })
     },
     addNewRect: function() {
-        var rect = Immutable.fromJS({x:50,y:50, w:50, h:50});
-        this.setModel(this.get('rects').push(rect));
+        var rect = Immutable.fromJS({x:50,y:50, w:50, h:50, id:""+Math.floor(Math.random()*100)});
+        this.setModel(this.model.updateIn(['rects'], function(rects) {
+            return rects.push(rect)
+        }));
     },
     undo: function() {
         if(this.historyIndex <= 0) return;
@@ -70,7 +72,25 @@ var DocumentModel = {
         this.fireUpdate();
     },
     setSelected: function(val) {
-        this.model.set('selected',val)
+        this.setModel(this.model.set('selected',val))
+    },
+    getSelected: function() {
+        return this.model.get('selected')
+    },
+    isSelected: function(rect) {
+        if(rect == null) return false;
+        if(this.getSelected() == null) return false;
+        if(this.getSelected().get('id') == rect.get('id')) return true;
+        return false;
+    },
+    deleteSelection: function() {
+        var sel = this.model.get('selected');
+        if(!sel) return;
+        this.setModel(this.model.updateIn(['rects'], function(rects) {
+            var n = rects.indexOf(sel);
+            return rects.splice(n,1);
+        }));
+        this.setModel(this.model.set('selected',null));
     }
 };
 
@@ -83,12 +103,13 @@ class Rect extends React.Component {
         }
     }
     render() {
+        var selected = DocumentModel.isSelected(this.props.model);
         var rect = <rect width={this.props.model.get('w')}
                      height={this.props.model.get('h')}
                      x={this.props.model.get('x')}
                      y={this.props.model.get('y')}
                      fill="cyan" stroke="black"
-                     className={this.state.pressed?"selected":""}
+                     className={selected?"selected":"unselected"}
                      onMouseDown={this.mouseDown.bind(this)}
                      onMouseMove={this.mouseMove.bind(this)}
                      onMouseUp={this.mouseUp.bind(this)}
@@ -135,7 +156,7 @@ class Toolbar extends React.Component {
     render() {
         return <div className="toolbar">
             <button onClick={DocumentModel.addNewRect.bind(DocumentModel)}>add</button>
-            <button>delete selection</button>
+            <button onClick={DocumentModel.deleteSelection.bind(DocumentModel)}>delete selection</button>
             <button onClick={DocumentModel.undo.bind(DocumentModel)}>undo</button>
             <button onClick={DocumentModel.redo.bind(DocumentModel)}>redo</button>
         </div>
@@ -157,9 +178,11 @@ class App extends React.Component {
     }
 
     render() {
+        var selected = this.state.model.get("selected");
         return <div className="main">
             <Toolbar/>
             <DrawingCanvas rects={this.state.model.get('rects')}/>
+            <label>selected = {selected==null?"null":selected.get('id')}</label>
         </div>
     }
 }
