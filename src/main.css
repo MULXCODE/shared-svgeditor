@@ -1,0 +1,15 @@
+svg {
+    border: 1px solid black;
+}
+
+.main-canvas {
+    width: 800px;
+    height: 300px;
+}
+
+rect {
+    fill: red;
+}
+rect.selected {
+    fill: green;
+}
