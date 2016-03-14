@@ -5,38 +5,42 @@ import Immutable from "immutable"
 import MainCSS from "./main.css"
 
 /*
-toolbar
-main canvas
-button to add rect
-button to delete selected rect
-button to undo
-button to redo
-click to select rect
-show selection handles on the rect
-drag rect
+//toolbar
+//main canvas
+//button to add rect
+//button to undo
+//button to redo
+
+ button to delete selected rect
+ click to select rect
+ show selection handles on the rect
+
+//drag rect
+
  */
 
 
-var arr = [{ x:20, y:30, w:40, h:50}, { x:100, y:30, w:40, h:20} ];
+var arr = {
+    selected:null,
+    rects:[{ x:20, y:30, w:40, h:50}, { x:100, y:30, w:40, h:20} ]};
 
 var DocumentModel = {
     listeners:[],
-    rects: Immutable.fromJS(arr),
+    model: Immutable.fromJS(arr),
     history:[],
     historyIndex:0,
     getModel: function() {
-        return this.rects;
+        return this.model;
     },
-    setModel: function(newrects) {
-        this.history.push(newrects);
+    setModel: function(newModel) {
+        this.history.push(newModel);
         this.historyIndex++;
-        this.rects = newrects;
+        this.model = newModel;
         this.fireUpdate();
     },
-    moved: function(rect,diff) {
+    moved: function(index,diff) {
         this.history = this.history.slice(0,this.historyIndex+1)
-        var n = this.rects.indexOf(rect);
-        this.setModel(this.rects.updateIn([n],function(r){
+        this.setModel(this.model.updateIn(['rects',index], function(r) {
             return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
         }));
     },
@@ -44,26 +48,29 @@ var DocumentModel = {
         this.listeners.push(cb);
     },
     fireUpdate: function() {
-        var self = this;
+        var model = this.getModel();
         this.listeners.forEach(function(cb) {
-            cb(self.getModel())
+            cb(model)
         })
     },
     addNewRect: function() {
         var rect = Immutable.fromJS({x:50,y:50, w:50, h:50});
-        this.setModel(this.rects.push(rect));
+        this.setModel(this.get('rects').push(rect));
     },
     undo: function() {
         if(this.historyIndex <= 0) return;
         this.historyIndex--;
-        this.rects = this.history[this.historyIndex];
+        this.model = this.history[this.historyIndex];
         this.fireUpdate();
     },
     redo: function() {
         if(this.historyIndex >= this.history.length-1) return;
         this.historyIndex++;
-        this.rects = this.history[this.historyIndex];
+        this.model = this.history[this.historyIndex];
         this.fireUpdate();
+    },
+    setSelected: function(val) {
+        this.model.set('selected',val)
     }
 };
 
@@ -95,12 +102,13 @@ class Rect extends React.Component {
                 x: e.clientX,
                 y: e.clientY
             }
-        })
+        });
+        DocumentModel.setSelected(this.props.model);
     }
     mouseMove(e) {
         if(!this.state.pressed) return;
         var curr = { x: e.clientX, y: e.clientY };
-        DocumentModel.moved(this.props.model, { x: curr.x-this.state.prev.x, y: curr.y-this.state.prev.y });
+        DocumentModel.moved(this.props.index, { x: curr.x-this.state.prev.x, y: curr.y-this.state.prev.y });
         this.setState({
             prev:curr
         });
@@ -116,7 +124,7 @@ class Rect extends React.Component {
 class DrawingCanvas extends React.Component {
     renderRects() {
         return this.props.rects.map(function(rect,i) {
-            return <Rect model={rect} key={"id"+i}/>
+            return <Rect model={rect} key={"id"+i} index={i}/>
         })
     }
     render() {
@@ -137,23 +145,21 @@ class Toolbar extends React.Component {
 class App extends React.Component {
     constructor(props) {
         super(props);
-        console.log("starting the constructor")
         this.state = {
-            rects: DocumentModel.getModel(),
-            selected:null
+            model: DocumentModel.getModel()
         }
     }
     componentWillMount() {
         var self = this;
         DocumentModel.on("update",function(state) {
-            self.setState({rects:state});
+            self.setState({model:state});
         })
     }
 
     render() {
         return <div className="main">
             <Toolbar/>
-            <DrawingCanvas rects={this.state.rects}/>
+            <DrawingCanvas rects={this.state.model.get('rects')}/>
         </div>
     }
 }
