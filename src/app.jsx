@@ -4,6 +4,8 @@ import Immutable from "immutable"
 
 import MainCSS from "./main.css"
 
+import PubNub from "pubnub";
+
 /*
 //toolbar
 //main canvas
@@ -11,14 +13,62 @@ import MainCSS from "./main.css"
 //button to undo
 //button to redo
 
- button to delete selected rect
- click to select rect
- show selection handles on the rect
+ //button to delete selected rect
+ //click to select rect
+ //show rect as selected
+ //drag rect
 
-//drag rect
+ connect two instances together using naive algorithm
+ only capture history when doing end of moving rect, or deleting, or creating, or changing selection.
+    don't capture history during the rect move
+ connect to the same PN channel
+ test that i don't receive my own messages
+ send events
+    change:  nodeid, property id, new value
+    add:  nodeid, placed after other nodeid (or
+    delete: nodeid
 
  */
 
+var CHANNEL = "joshdemo76";
+var uuid = "id"+Math.floor(Math.random()*100);
+
+var pn = PubNub.init({
+    subscribe_key:"sub-c-a076eb0a-eaf8-11e5-baae-0619f8945a4f",
+    publish_key:"pub-c-b0117d93-cf4b-4061-8f17-c1ca705066a6",
+    error: function(err){
+        console.log("error happened",err);
+    },
+    uuid: uuid
+});
+
+pn.subscribe({
+    channel:CHANNEL,
+    message:function(mess,env,chgrp,time, ch){
+        if(mess.uuid == uuid) {
+            //console.log("my own");
+            return;
+        }
+        //console.log("message",mess);
+        //console.log("envelope",env);
+        //console.log("channel or group",chgrp);
+        //console.log("time",time);
+        //console.log("channel",ch);
+        DocumentModel.processEvent(mess);
+    },
+    presence: function(pres){
+        //console.log("presence",pres);
+    }
+});
+
+
+function publish(msg) {
+    msg.uuid = uuid;
+    pn.publish({
+        channel:CHANNEL,
+        message:msg
+    })
+}
 
 var arr = {
     selected:null,
@@ -41,7 +91,33 @@ var DocumentModel = {
     moved: function(index,diff) {
         this.history = this.history.slice(0,this.historyIndex+1)
         this.setModel(this.model.updateIn(['rects',index], function(r) {
+            publish({
+                nodeid:r.get('id'),
+                props:[
+                    { id:'x', value:r.get('x')+diff.x },
+                    { id:'y', value:r.get('y')+diff.y }
+                ]
+            });
             return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
+        }));
+    },
+    processEvent: function(obj) {
+        //console.log("processing",obj);
+        var rects = this.model.get('rects');
+        var found = rects.find(function(r){
+            return r.get('id') == obj.nodeid;
+        });
+        //console.log("found = ", found);
+        var n = rects.indexOf(found);
+        //console.log("n = ", n);
+        this.setModel(this.model.updateIn(['rects',n], function(r){
+            for(var i=0; i<obj.props.length; i++) {
+                var prop = obj.props[i];
+                //console.log("prop = ", prop);
+                r = r.set(prop.id, prop.value);
+            }
+            return r;
+            //return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
         }));
     },
     on: function(type, cb) {
