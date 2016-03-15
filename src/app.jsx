@@ -21,13 +21,16 @@ import PubNub from "pubnub";
  connect two instances together using naive algorithm
  only capture history when doing end of moving rect, or deleting, or creating, or changing selection.
     don't capture history during the rect move
- connect to the same PN channel
- test that i don't receive my own messages
- send events
-    change:  nodeid, property id, new value
+
+ //connect to the same PN channel
+ //test that i don't receive my own messages
+ //send events
+//    change:  nodeid, property id, new value
     add:  nodeid, placed after other nodeid (or
     delete: nodeid
 
+must buffer the node movements to ensure they don't occur too frequenty. min spacing of 100ms
+move cursor callback code into the DocumentModel. fix on(type) callbacks
  */
 
 var CHANNEL = "joshdemo76";
