@@ -42,24 +42,6 @@ var pn = PubNub.init({
     uuid: uuid
 });
 
-pn.subscribe({
-    channel:CHANNEL,
-    message:function(mess,env,chgrp,time, ch){
-        if(mess.uuid == uuid) {
-            //console.log("my own");
-            return;
-        }
-        //console.log("message",mess);
-        //console.log("envelope",env);
-        //console.log("channel or group",chgrp);
-        //console.log("time",time);
-        //console.log("channel",ch);
-        DocumentModel.processEvent(mess);
-    },
-    presence: function(pres){
-        //console.log("presence",pres);
-    }
-});
 
 
 function publish(msg) {
@@ -70,9 +52,41 @@ function publish(msg) {
     })
 }
 
+var BufferedSender = {
+    timeout_id:-1,
+    last_sent : new Date().getTime(),
+    MAX_DELAY: 100,
+    sendNow : function(msg) {
+        msg.uuid = uuid;
+        pn.publish({
+            channel:CHANNEL,
+            message:msg
+        });
+        this.last_sent = new Date().getTime();
+    },
+    publishBuffered:function(msg) {
+        var diff = new Date().getTime() - this.last_sent;
+        if(diff > this.MAX_DELAY) {
+            this.sendNow(msg);
+        }
+        clearTimeout(this.timeout_id);
+        var self = this;
+        this.timeout_id = setTimeout(function() {
+            self.sendNow(msg);
+        },this.MAX_DELAY);
+    }
+
+};
+
+
+
+
 var arr = {
     selected:null,
-    rects:[{ x:20, y:30, w:40, h:50, id:'00'}, { x:100, y:30, w:40, h:20, id:'01'} ]};
+    rects:[
+        { x:20, y:30, w:40, h:50, id:'00'},
+        { x:100, y:30, w:40, h:20, id:'01'}
+    ]};
 
 var DocumentModel = {
     listeners:[],
@@ -92,6 +106,7 @@ var DocumentModel = {
         this.history = this.history.slice(0,this.historyIndex+1)
         this.setModel(this.model.updateIn(['rects',index], function(r) {
             publish({
+                type:"move",
                 nodeid:r.get('id'),
                 props:[
                     { id:'x', value:r.get('x')+diff.x },
@@ -101,23 +116,18 @@ var DocumentModel = {
             return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
         }));
     },
-    processEvent: function(obj) {
-        //console.log("processing",obj);
+    processMoveEvent: function(obj) {
         var rects = this.model.get('rects');
         var found = rects.find(function(r){
             return r.get('id') == obj.nodeid;
         });
-        //console.log("found = ", found);
         var n = rects.indexOf(found);
-        //console.log("n = ", n);
         this.setModel(this.model.updateIn(['rects',n], function(r){
             for(var i=0; i<obj.props.length; i++) {
                 var prop = obj.props[i];
-                //console.log("prop = ", prop);
                 r = r.set(prop.id, prop.value);
             }
             return r;
-            //return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
         }));
     },
     on: function(type, cb) {
@@ -218,14 +228,46 @@ class Rect extends React.Component {
 
 }
 
+var cursorCallback;
+
 class DrawingCanvas extends React.Component {
+    constructor(props) {
+        super(props)
+        this.state = {
+            cursor: {
+                x:0,
+                y:0
+            }
+        }
+    }
     renderRects() {
         return this.props.rects.map(function(rect,i) {
             return <Rect model={rect} key={"id"+i} index={i}/>
         })
     }
+    renderCursor(pos) {
+        return <rect fill="#00ff00" width="10" height="10" x={pos.x} y={pos.y}/>
+    }
+    mouseMoved(e) {
+        var curr = { x: e.clientX, y: e.clientY };
+        BufferedSender.publishBuffered({
+            type:"cursor",
+            position:curr
+        });
+    }
+    componentWillMount() {
+        var self = this;
+        cursorCallback = function(msg) {
+            self.setState({
+                cursor:msg.position
+            });
+        }
+    }
     render() {
-        return <svg className="main-canvas"><g>{this.renderRects()}</g></svg>
+        return <svg className="main-canvas" onMouseMove={this.mouseMoved.bind(this)}>
+            <g>{this.renderRects()}</g>
+            {this.renderCursor(this.state.cursor)}
+        </svg>
     }
 }
 class Toolbar extends React.Component {
@@ -237,6 +279,10 @@ class Toolbar extends React.Component {
             <button onClick={DocumentModel.redo.bind(DocumentModel)}>redo</button>
         </div>
     }
+}
+
+function fireCursorMove(cursorMove) {
+    cursorCallback(cursorMove);
 }
 
 class App extends React.Component {
@@ -266,3 +312,16 @@ class App extends React.Component {
 ReactDOM.render(<App/>,document.getElementsByTagName("body")[0]);
 
 
+pn.subscribe({
+    channel:CHANNEL,
+    message:function(mess,env,chgrp,time, ch){
+        if(mess.uuid == uuid) return;
+        if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
+        if(mess.type == 'cursor') {
+            return fireCursorMove(mess);
+        }
+    },
+    presence: function(pres){
+        //console.log("presence",pres);
+    }
+});
