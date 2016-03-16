@@ -133,20 +133,14 @@ var DocumentModel = {
             return r;
         }));
     },
-    makeNewRect: function(id) {
-        return Immutable.fromJS({x:50,y:50, w:50, h:50, id:id});
-    },
-    processAddEvent: function(obj) {
-        var newRect = this.makeNewRect(obj.nodeid);
-        this.setModel(this.model.updateIn(['rects'], function(rects){
-            return rects.push(newRect);
-        }));
-    },
     on: function(type, cb) {
         this.listeners[type].push(cb);
     },
     fireUpdate: function(type,object) {
         this.listeners[type].forEach((cb) => cb(object))
+    },
+    makeNewRect: function(id) {
+        return Immutable.fromJS({x:50,y:50, w:50, h:50, id:id});
     },
     addNewRect: function() {
         var newRect = this.makeNewRect(""+Math.floor(Math.random()*100));
@@ -158,6 +152,13 @@ var DocumentModel = {
             nodeid:newRect.get('id')
         })
     },
+    processAddEvent: function(obj) {
+        var newRect = this.makeNewRect(obj.nodeid);
+        this.setModel(this.model.updateIn(['rects'], function(rects){
+            return rects.push(newRect);
+        }));
+    },
+
     undo: function() {
         if(this.historyIndex <= 0) return;
         this.historyIndex--;
@@ -170,6 +171,7 @@ var DocumentModel = {
         this.model = this.history[this.historyIndex];
         this.fireUpdate('update',this.getModel());
     },
+
     setSelected: function(val) {
         this.setModel(this.model.set('selected',val))
     },
@@ -182,14 +184,23 @@ var DocumentModel = {
         if(this.getSelected().get('id') == rect.get('id')) return true;
         return false;
     },
+
     deleteSelection: function() {
         var sel = this.model.get('selected');
         if(!sel) return;
         this.setModel(this.model.updateIn(['rects'], function(rects) {
-            var n = rects.indexOf(sel);
-            return rects.splice(n,1);
+            return rects.filterNot((r)=>r.get('id') == sel.get('id'))
         }));
         this.setModel(this.model.set('selected',null));
+        publish({
+            type:'delete',
+            nodeid:sel.get('id')
+        })
+    },
+    processDeleteEvent: function(obj) {
+        this.setModel(this.model.updateIn(['rects'], function(rects){
+            return rects.filterNot((r)=>r.get('id') == obj.nodeid)
+        }));
     },
     fireCursorMove: function(cursorMove) {
         this.fireUpdate('cursor',cursorMove);
@@ -321,6 +332,7 @@ pn.subscribe({
         if(mess.uuid == uuid) return; //ignore my own updates
         if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
         if(mess.type == 'add')  return DocumentModel.processAddEvent(mess);
+        if(mess.type == 'delete')  return DocumentModel.processDeleteEvent(mess);
         if(mess.type == 'cursor') return DocumentModel.fireCursorMove(mess);
     },
     presence: function(pres){
