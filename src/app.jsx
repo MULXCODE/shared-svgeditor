@@ -33,56 +33,76 @@ must buffer the node movements to ensure they don't occur too frequenty. min spa
 move cursor callback code into the DocumentModel. fix on(type) callbacks
  */
 
-var CHANNEL = "joshdemo76";
-var uuid = "id"+Math.floor(Math.random()*100);
-
-var pn = PubNub.init({
-    subscribe_key:"sub-c-a076eb0a-eaf8-11e5-baae-0619f8945a4f",
-    publish_key:"pub-c-b0117d93-cf4b-4061-8f17-c1ca705066a6",
-    error: function(err){
-        console.log("error happened",err);
-    },
-    uuid: uuid
-});
 
 
 
-function publish(msg) {
-    msg.uuid = uuid;
-    pn.publish({
-        channel:CHANNEL,
-        message:msg
-    })
-}
 
-var BufferedSender = {
-    timeout_id:-1,
-    last_sent : new Date().getTime(),
-    MAX_DELAY: 100,
-    sendNow : function(msg) {
-        msg.uuid = uuid;
-        pn.publish({
-            channel:CHANNEL,
-            message:msg
+
+
+class PNUtil {
+    init() {
+        this.CHANNEL = "joshdemo76";
+        this.uuid = "id"+Math.floor(Math.random()*100);
+        this.pn = PubNub.init({
+            subscribe_key:"sub-c-a076eb0a-eaf8-11e5-baae-0619f8945a4f",
+            publish_key:"pub-c-b0117d93-cf4b-4061-8f17-c1ca705066a6",
+            error: function(err){
+                console.log("error happened",err);
+            },
+            uuid: this.uuid
         });
-        this.last_sent = new Date().getTime();
-    },
-    publishBuffered:function(msg) {
-        var diff = new Date().getTime() - this.last_sent;
-        if(diff > this.MAX_DELAY) {
-            this.sendNow(msg);
-        }
-        clearTimeout(this.timeout_id);
-        var self = this;
-        this.timeout_id = setTimeout(function() {
-            self.sendNow(msg);
-        },this.MAX_DELAY);
+        this.timeout_ids = {};
+        this.last_sents = {};
+        this.MAX_DELAY = 100;
+
+        this.pn.subscribe({
+            channel:this.CHANNEL,
+            message:this.receiveMessage.bind(this)
+        });
     }
 
-};
+    receiveMessage(mess) {
+        if(mess.uuid == this.uuid) return; //ignore my own updates
+        if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
+        if(mess.type == 'add')  return DocumentModel.processAddEvent(mess);
+        if(mess.type == 'delete')  return DocumentModel.processDeleteEvent(mess);
+        if(mess.type == 'cursor') return DocumentModel.fireCursorMove(mess);
+    }
 
+    getNow() {
+        return new Date().getTime()
+    }
 
+    publishNow(msg) {
+        msg.uuid = this.uuid;
+        this.pn.publish({
+            channel:this.CHANNEL,
+            message:msg
+        });
+        this.last_sents[msg.type] = this.getNow()
+    }
 
+    getLastTime(type) {
+        if(!this.last_sents[type]) this.last_sents[type] = new Date().getTime();
+        return this.last_sents[type]
+    }
+
+    publishBuffered(msg) {
+        //calc time since last message sent
+        var diff = this.getNow() - this.getLastTime(msg.type)
+        //if too long, then send it now
+        if(diff > this.MAX_DELAY) {
+            return this.publishNow(msg);
+        } else {
+            //else clear the timeout and send it later
+            clearTimeout(this.timeout_ids[msg.type]);
+            this.timeout_ids[msg.type] = setTimeout(() => this.publishNow(msg), this.MAX_DELAY);
+        }
+    }
+}
+
+var pnutil = new PNUtil();
+pnutil.init();
 
 var arr = {
     selected:null,
@@ -105,10 +125,11 @@ var DocumentModel = {
         this.model = newModel;
         this.fireUpdate('update',this.getModel());
     },
+
     moved: function(index,diff) {
         this.history = this.history.slice(0,this.historyIndex+1); //clear the redo buffer
         this.setModel(this.model.updateIn(['rects',index], function(r) {
-            publish({
+            pnutil.publishBuffered({
                 type:"move",
                 nodeid:r.get('id'),
                 props:[
@@ -116,9 +137,11 @@ var DocumentModel = {
                     { id:'y', value:r.get('y')+diff.y }
                 ]
             });
+
             return r.set('x',r.get('x')+diff.x).set('y',r.get('y')+diff.y);
         }));
     },
+
     processMoveEvent: function(obj) {
         var rects = this.model.get('rects');
         var found = rects.find(function(r){
@@ -133,12 +156,19 @@ var DocumentModel = {
             return r;
         }));
     },
+
+
+    fireCursorMove: function(cursorMove) {
+        this.fireUpdate('cursor',cursorMove);
+    },
+
     on: function(type, cb) {
         this.listeners[type].push(cb);
     },
     fireUpdate: function(type,object) {
         this.listeners[type].forEach((cb) => cb(object))
     },
+
     makeNewRect: function(id) {
         return Immutable.fromJS({x:50,y:50, w:50, h:50, id:id});
     },
@@ -147,7 +177,7 @@ var DocumentModel = {
         this.setModel(this.model.updateIn(['rects'], function(rects) {
             return rects.push(newRect)
         }));
-        publish({
+        pnutil.publishNow({
             type:'add',
             nodeid:newRect.get('id')
         })
@@ -192,7 +222,7 @@ var DocumentModel = {
             return rects.filterNot((r)=>r.get('id') == sel.get('id'))
         }));
         this.setModel(this.model.set('selected',null));
-        publish({
+        pnutil.publishNow({
             type:'delete',
             nodeid:sel.get('id')
         })
@@ -202,9 +232,7 @@ var DocumentModel = {
             return rects.filterNot((r)=>r.get('id') == obj.nodeid)
         }));
     },
-    fireCursorMove: function(cursorMove) {
-        this.fireUpdate('cursor',cursorMove);
-    }
+
 };
 
 class Rect extends React.Component {
@@ -275,7 +303,7 @@ class DrawingCanvas extends React.Component {
     }
     mouseMoved(e) {
         var curr = { x: e.clientX, y: e.clientY };
-        BufferedSender.publishBuffered({
+        pnutil.publishBuffered({
             type:"cursor",
             position:curr
         });
@@ -326,16 +354,3 @@ class App extends React.Component {
 ReactDOM.render(<App/>,document.getElementsByTagName("body")[0]);
 
 
-pn.subscribe({
-    channel:CHANNEL,
-    message:function(mess,env,chgrp,time, ch){
-        if(mess.uuid == uuid) return; //ignore my own updates
-        if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
-        if(mess.type == 'add')  return DocumentModel.processAddEvent(mess);
-        if(mess.type == 'delete')  return DocumentModel.processDeleteEvent(mess);
-        if(mess.type == 'cursor') return DocumentModel.fireCursorMove(mess);
-    },
-    presence: function(pres){
-        //console.log("presence",pres);
-    }
-});
