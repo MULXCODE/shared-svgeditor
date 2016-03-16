@@ -106,7 +106,7 @@ var DocumentModel = {
         this.fireUpdate('update',this.getModel());
     },
     moved: function(index,diff) {
-        this.history = this.history.slice(0,this.historyIndex+1)
+        this.history = this.history.slice(0,this.historyIndex+1); //clear the redo buffer
         this.setModel(this.model.updateIn(['rects',index], function(r) {
             publish({
                 type:"move",
@@ -133,19 +133,30 @@ var DocumentModel = {
             return r;
         }));
     },
+    makeNewRect: function(id) {
+        return Immutable.fromJS({x:50,y:50, w:50, h:50, id:id});
+    },
+    processAddEvent: function(obj) {
+        var newRect = this.makeNewRect(obj.nodeid);
+        this.setModel(this.model.updateIn(['rects'], function(rects){
+            return rects.push(newRect);
+        }));
+    },
     on: function(type, cb) {
         this.listeners[type].push(cb);
     },
     fireUpdate: function(type,object) {
-        this.listeners[type].forEach(function(cb) {
-            cb(object)
-        })
+        this.listeners[type].forEach((cb) => cb(object))
     },
     addNewRect: function() {
-        var rect = Immutable.fromJS({x:50,y:50, w:50, h:50, id:""+Math.floor(Math.random()*100)});
+        var newRect = this.makeNewRect(""+Math.floor(Math.random()*100));
         this.setModel(this.model.updateIn(['rects'], function(rects) {
-            return rects.push(rect)
+            return rects.push(newRect)
         }));
+        publish({
+            type:'add',
+            nodeid:newRect.get('id')
+        })
     },
     undo: function() {
         if(this.historyIndex <= 0) return;
@@ -309,6 +320,7 @@ pn.subscribe({
     message:function(mess,env,chgrp,time, ch){
         if(mess.uuid == uuid) return; //ignore my own updates
         if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
+        if(mess.type == 'add')  return DocumentModel.processAddEvent(mess);
         if(mess.type == 'cursor') return DocumentModel.fireCursorMove(mess);
     },
     presence: function(pres){
