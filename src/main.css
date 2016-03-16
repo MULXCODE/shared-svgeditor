@@ -13,3 +13,7 @@ rect {
 rect.selected {
     fill: green;
 }
+
+rect.cursor {
+    fill: #ff2288;
+}

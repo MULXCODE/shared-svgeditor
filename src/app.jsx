@@ -18,7 +18,7 @@ import PubNub from "pubnub";
  //show rect as selected
  //drag rect
 
- connect two instances together using naive algorithm
+ //connect two instances together using naive algorithm
  only capture history when doing end of moving rect, or deleting, or creating, or changing selection.
     don't capture history during the rect move
 
@@ -26,11 +26,11 @@ import PubNub from "pubnub";
  //test that i don't receive my own messages
  //send events
 //    change:  nodeid, property id, new value
-    add:  nodeid, placed after other nodeid (or
-    delete: nodeid
+    //add:  nodeid, placed after other nodeid (or
+    //delete: nodeid
 
-must buffer the node movements to ensure they don't occur too frequenty. min spacing of 100ms
-move cursor callback code into the DocumentModel. fix on(type) callbacks
+//must buffer the node movements to ensure they don't occur too frequenty. min spacing of 100ms
+//move cursor callback code into the DocumentModel. fix on(type) callbacks
  */
 
 
@@ -107,7 +107,7 @@ pnutil.init();
 var arr = {
     selected:null,
     rects:[
-        { x:20, y:30, w:40, h:50, id:'00'},
+        { x:100, y:100, w:100, h:50, id:'00'},
         { x:100, y:30, w:40, h:20, id:'01'}
     ]};
 
@@ -242,10 +242,13 @@ class Rect extends React.Component {
             pressed: false,
             prev: null
         }
+        //make bound versions of some callbacks
+        this.documentMouseMove_listener = this.documentMouseMove.bind(this);
+        this.documentMouseUp_listener = this.documentMouseUp.bind(this);
     }
     render() {
         var selected = DocumentModel.isSelected(this.props.model);
-        var rect = <rect width={this.props.model.get('w')}
+        var rect = <rect ref='rect' width={this.props.model.get('w')}
                      height={this.props.model.get('h')}
                      x={this.props.model.get('x')}
                      y={this.props.model.get('y')}
@@ -258,27 +261,36 @@ class Rect extends React.Component {
         return rect
     }
     mouseDown(e) {
+        var bounds = this.props.canvas.refs.canvas.getBoundingClientRect();
+        var curr = { x: e.clientX - bounds.left, y: e.clientY - bounds.top };
         this.setState({
             pressed:true,
-            prev: {
-                x: e.clientX,
-                y: e.clientY
-            }
+            prev: curr
         });
         DocumentModel.setSelected(this.props.model);
+        //attach to the document
+        document.addEventListener("mousemove",this.documentMouseMove_listener);
+        document.addEventListener("mouseup",this.documentMouseUp_listener);
     }
-    mouseMove(e) {
-        if(!this.state.pressed) return;
-        var curr = { x: e.clientX, y: e.clientY };
-        DocumentModel.moved(this.props.index, { x: curr.x-this.state.prev.x, y: curr.y-this.state.prev.y });
+    documentMouseMove(e) {
+        var bounds = this.props.canvas.refs.canvas.getBoundingClientRect();
+        var curr = { x: e.clientX - bounds.left, y: e.clientY - bounds.top };
+        var diff = { x: curr.x-this.state.prev.x, y: curr.y-this.state.prev.y };
+        DocumentModel.moved(this.props.index, diff);
         this.setState({
             prev:curr
         });
     }
-    mouseUp(e) {
+    documentMouseUp(e) {
+        document.removeEventListener('mousemove',this.documentMouseMove_listener);
+        document.removeEventListener('mouseup',this.documentMouseUp_listener);
         this.setState({
             pressed:false
         })
+    }
+    mouseMove(e) {
+    }
+    mouseUp(e) {
     }
 
 }
@@ -294,15 +306,17 @@ class DrawingCanvas extends React.Component {
         }
     }
     renderRects() {
+        var self = this;
         return this.props.rects.map(function(rect,i) {
-            return <Rect model={rect} key={"id"+i} index={i}/>
+            return <Rect model={rect} key={"id"+i} index={i} canvas={self}/>
         })
     }
     renderCursor(pos) {
-        return <rect fill="#00ff00" width="10" height="10" x={pos.x} y={pos.y}/>
+        return <rect fill="cyan" stroke="#000000" width="10" height="10" x={pos.x} y={pos.y} className="cursor"/>
     }
     mouseMoved(e) {
-        var curr = { x: e.clientX, y: e.clientY };
+        var rect = this.refs.canvas.getBoundingClientRect();
+        var curr = { x: e.clientX-rect.left, y: e.clientY-rect.top };
         pnutil.publishBuffered({
             type:"cursor",
             position:curr
@@ -312,12 +326,13 @@ class DrawingCanvas extends React.Component {
         DocumentModel.on('cursor', (msg) => this.setState({cursor:msg.position}))
     }
     render() {
-        return <svg className="main-canvas" onMouseMove={this.mouseMoved.bind(this)}>
+        return <svg ref='canvas' className="main-canvas" onMouseMove={this.mouseMoved.bind(this)}>
             <g>{this.renderRects()}</g>
             {this.renderCursor(this.state.cursor)}
         </svg>
     }
 }
+
 class Toolbar extends React.Component {
     render() {
         return <div className="toolbar">
@@ -328,7 +343,6 @@ class Toolbar extends React.Component {
         </div>
     }
 }
-
 
 class App extends React.Component {
     constructor(props) {
