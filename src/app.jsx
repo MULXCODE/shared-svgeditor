@@ -92,7 +92,7 @@ var arr = {
     ]};
 
 var DocumentModel = {
-    listeners:[],
+    listeners:{'update':[],'cursor':[]},
     model: Immutable.fromJS(arr),
     history:[],
     historyIndex:0,
@@ -103,7 +103,7 @@ var DocumentModel = {
         this.history.push(newModel);
         this.historyIndex++;
         this.model = newModel;
-        this.fireUpdate();
+        this.fireUpdate('update',this.getModel());
     },
     moved: function(index,diff) {
         this.history = this.history.slice(0,this.historyIndex+1)
@@ -134,12 +134,11 @@ var DocumentModel = {
         }));
     },
     on: function(type, cb) {
-        this.listeners.push(cb);
+        this.listeners[type].push(cb);
     },
-    fireUpdate: function() {
-        var model = this.getModel();
-        this.listeners.forEach(function(cb) {
-            cb(model)
+    fireUpdate: function(type,object) {
+        this.listeners[type].forEach(function(cb) {
+            cb(object)
         })
     },
     addNewRect: function() {
@@ -152,13 +151,13 @@ var DocumentModel = {
         if(this.historyIndex <= 0) return;
         this.historyIndex--;
         this.model = this.history[this.historyIndex];
-        this.fireUpdate();
+        this.fireUpdate('update',this.getModel());
     },
     redo: function() {
         if(this.historyIndex >= this.history.length-1) return;
         this.historyIndex++;
         this.model = this.history[this.historyIndex];
-        this.fireUpdate();
+        this.fireUpdate('update',this.getModel());
     },
     setSelected: function(val) {
         this.setModel(this.model.set('selected',val))
@@ -180,6 +179,9 @@ var DocumentModel = {
             return rects.splice(n,1);
         }));
         this.setModel(this.model.set('selected',null));
+    },
+    fireCursorMove: function(cursorMove) {
+        this.fireUpdate('cursor',cursorMove);
     }
 };
 
@@ -231,8 +233,6 @@ class Rect extends React.Component {
 
 }
 
-var cursorCallback;
-
 class DrawingCanvas extends React.Component {
     constructor(props) {
         super(props)
@@ -259,12 +259,7 @@ class DrawingCanvas extends React.Component {
         });
     }
     componentWillMount() {
-        var self = this;
-        cursorCallback = function(msg) {
-            self.setState({
-                cursor:msg.position
-            });
-        }
+        DocumentModel.on('cursor', (msg) => this.setState({cursor:msg.position}))
     }
     render() {
         return <svg className="main-canvas" onMouseMove={this.mouseMoved.bind(this)}>
@@ -284,9 +279,6 @@ class Toolbar extends React.Component {
     }
 }
 
-function fireCursorMove(cursorMove) {
-    cursorCallback(cursorMove);
-}
 
 class App extends React.Component {
     constructor(props) {
@@ -296,10 +288,7 @@ class App extends React.Component {
         }
     }
     componentWillMount() {
-        var self = this;
-        DocumentModel.on("update",function(state) {
-            self.setState({model:state});
-        })
+        DocumentModel.on("update",(model) => this.setState({model:model}))
     }
 
     render() {
@@ -318,11 +307,9 @@ ReactDOM.render(<App/>,document.getElementsByTagName("body")[0]);
 pn.subscribe({
     channel:CHANNEL,
     message:function(mess,env,chgrp,time, ch){
-        if(mess.uuid == uuid) return;
+        if(mess.uuid == uuid) return; //ignore my own updates
         if(mess.type == 'move') return DocumentModel.processMoveEvent(mess);
-        if(mess.type == 'cursor') {
-            return fireCursorMove(mess);
-        }
+        if(mess.type == 'cursor') return DocumentModel.fireCursorMove(mess);
     },
     presence: function(pres){
         //console.log("presence",pres);
